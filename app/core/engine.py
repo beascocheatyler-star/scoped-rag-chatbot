@@ -294,7 +294,7 @@ class ChatEngine:
                 output_config={"effort": self.settings.effort},
             )
         except Exception as exc:
-            raise self._translate_error(exc)
+            raise self._translate_error(exc, self.settings.model)
 
         if getattr(response, "stop_reason", None) == "refusal":
             return Answer(
@@ -370,6 +370,14 @@ class ChatEngine:
         while recent and recent[0]["role"] != "user":
             recent.pop(0)
 
+        # A trailing user turn would be merged with the grounded turn appended
+        # below (the API combines consecutive same-role messages), splicing a
+        # stale question into the same turn as the fresh CONTEXT block and
+        # blurring which question the passages belong to. Drop it: the current
+        # question is what matters, and its answer is already in history.
+        while recent and recent[-1]["role"] != "assistant":
+            recent.pop()
+
         for turn in recent:
             messages.append({"role": turn["role"], "content": turn["content"]})
 
@@ -377,7 +385,7 @@ class ChatEngine:
         return messages
 
     @staticmethod
-    def _translate_error(exc: Exception) -> Exception:
+    def _translate_error(exc: Exception, model: str = "the configured model") -> Exception:
         """Convert SDK exceptions into messages a grader can act on."""
         try:
             import anthropic
@@ -396,9 +404,7 @@ class ChatEngine:
         if isinstance(exc, anthropic.NotFoundError):
             return LLMUnavailableError(
                 "Model '{}' was not found or is not available to your account. "
-                "Set MODEL in your .env to one you can access.".format(
-                    getattr(exc, "model", "configured model")
-                )
+                "Set MODEL in your .env to one you can access.".format(model)
             )
         if isinstance(exc, anthropic.APIConnectionError):
             return LLMUnavailableError(

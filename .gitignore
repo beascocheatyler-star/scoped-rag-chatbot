@@ -3,7 +3,7 @@
 
 # Runtime data (uploaded documents and the persisted index)
 data/
-*.json.tmp
+*.tmp
 
 # Python
 __pycache__/

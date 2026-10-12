@@ -8,9 +8,12 @@ survives a restart.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -32,11 +35,38 @@ class Persona:
 
     @classmethod
     def from_dict(cls, data: Dict) -> "Persona":
+        """Build a Persona from untrusted data, coercing bad values to defaults.
+
+        This is a trust boundary: ``data`` may come from a hand-edited or
+        corrupted ``persona.json``. Anything unusable is replaced with the field
+        default rather than allowed to produce a Persona that explodes later on
+        a ``.strip()`` call.
+        """
+        if not isinstance(data, dict):
+            return cls()
+
+        defaults = cls()
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
-        return cls(**{k: v for k, v in data.items() if k in known})
+        clean: Dict = {}
+
+        for key, value in data.items():
+            if key not in known:
+                continue
+            if key == "suggested_questions":
+                if isinstance(value, list):
+                    clean[key] = [str(v) for v in value if isinstance(v, (str, int))]
+            elif isinstance(value, str):
+                clean[key] = value
+            elif value is not None:
+                # Numbers and similar are salvageable as text; None is not.
+                clean[key] = str(value)
+
+        merged = {f: getattr(defaults, f) for f in known}
+        merged.update(clean)
+        return cls(**merged)
 
     def effective_greeting(self) -> str:
-        if self.greeting.strip():
+        if isinstance(self.greeting, str) and self.greeting.strip():
             return self.greeting
         return (
             "Hi — I'm {}. I answer questions about {}, using only the documents "
@@ -91,12 +121,19 @@ class PersonaStore:
         self._persona = self._load()
 
     def _load(self) -> Persona:
-        if self._path.exists():
-            try:
-                return Persona.from_dict(json.loads(self._path.read_text("utf-8")))
-            except (json.JSONDecodeError, OSError, TypeError):
-                pass
-        return Persona()
+        """Load the persisted persona, falling back to defaults on any problem.
+
+        Runs at import time, so a malformed file must never prevent startup.
+        """
+        if not self._path.exists():
+            return Persona()
+        try:
+            return Persona.from_dict(json.loads(self._path.read_text("utf-8")))
+        except Exception:
+            logger.warning(
+                "Could not read %s; falling back to the default persona.", self._path
+            )
+            return Persona()
 
     @property
     def current(self) -> Persona:

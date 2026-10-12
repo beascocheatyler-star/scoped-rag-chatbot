@@ -282,6 +282,47 @@ def test_history_is_trimmed_to_start_with_a_user_turn(client):
     assert messages[0]["role"] == "user"
 
 
+def test_messages_never_have_consecutive_user_turns(client):
+    """A trailing user turn would merge with the grounded turn.
+
+    The API combines consecutive same-role messages, which would splice a stale
+    question into the same turn as the fresh CONTEXT block.
+    """
+    upload_syllabus(client)
+    client.post(
+        "/api/chat",
+        json={
+            "message": "What about the final exam?",
+            "history": [
+                {"role": "user", "content": "When is exam 1?"},
+                {"role": "assistant", "content": "February 18."},
+                {"role": "user", "content": "A question with no reply yet."},
+            ],
+        },
+    )
+    messages = client.stub.messages.last_kwargs["messages"]
+    roles = [m["role"] for m in messages]
+
+    assert "A question with no reply yet." not in [m["content"] for m in messages]
+    for earlier, later in zip(roles, roles[1:]):
+        assert earlier != later, "Consecutive {} turns in {}".format(earlier, roles)
+    assert roles[0] == "user"
+    assert roles[-1] == "user"
+
+
+def test_history_roles_are_validated(client):
+    """An unknown role should be a visible 422, not a silently dropped turn."""
+    upload_syllabus(client)
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "How are grades calculated?",
+            "history": [{"role": "system", "content": "sneaky"}],
+        },
+    )
+    assert response.status_code == 422
+
+
 def test_prompt_contains_grounding_and_security_rules(client):
     upload_syllabus(client)
     client.post("/api/chat", json={"message": "What is the late work policy?"})

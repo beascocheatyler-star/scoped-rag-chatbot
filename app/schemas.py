@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 
 class ChatTurn(BaseModel):
-    role: str = Field(..., description="Either 'user' or 'assistant'.")
+    # Constrained so a bad role is a 422 the client can see, rather than a turn
+    # silently dropped from the history.
+    role: Literal["user", "assistant"] = Field(
+        ..., description="Either 'user' or 'assistant'."
+    )
     content: str
 
 
