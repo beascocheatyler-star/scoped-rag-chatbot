@@ -235,7 +235,7 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-**127 tests, all running offline with no API key and no spend** — the LLM is
+**159 tests, all running offline with no API key and no spend** — the LLM is
 stubbed, and the scope gate is pure retrieval logic, so the behaviour that
 matters most is verifiable for free.
 
@@ -246,6 +246,27 @@ corrupt-state recovery, all HTTP endpoints, partial-upload failure, prompt
 construction, history replay, and — most importantly — **cross-domain scope
 enforcement**: that a support bot does not answer course questions and vice
 versa.
+
+The frontend markdown renderer writes to `innerHTML`, so it has its own suite
+(`tests/markdown_harness.js`) covering rendering and XSS escaping. It runs
+through `node` if installed, otherwise macOS's built-in JavaScriptCore, and
+skips cleanly when neither is available.
+
+### See scope enforcement without an API key
+
+```bash
+python scripts/demo_scope.py
+```
+
+Runs a labelled question set through the gate and prints what each bot accepts
+and refuses — including the cross-domain cases. No key, no network, ~2 seconds.
+
+```bash
+python scripts/measure_scope.py
+```
+
+Prints the score distribution and error counts by threshold — the measurements
+behind the tuning decisions in [`docs/scope-tuning.md`](docs/scope-tuning.md).
 
 ---
 
