@@ -27,12 +27,123 @@
     chatInput: $("chat-input"),
     sendBtn: $("send-btn"),
     resetChat: $("reset-chat"),
+    sidebar: $("sidebar"),
+    sidebarToggle: $("sidebar-toggle"),
+    scrollTop: $("scroll-top"),
+    scrollBottom: $("scroll-bottom"),
   };
 
   /** Conversation history sent to the API (prose only, no context blocks). */
   let history = [];
   let greeting = "";
   let busy = false;
+
+  // ------------------------------------------------------------- scrolling
+
+  /** px from the bottom within which we consider the user "pinned" to the end. */
+  const STICK_THRESHOLD = 120;
+
+  /**
+   * True when the transcript is scrolled at (or very near) the bottom.
+   * Drives whether new messages are allowed to pull the view down: if the
+   * user has deliberately scrolled up to re-read something, we leave them
+   * where they are instead of yanking them back.
+   */
+  function isPinnedToBottom() {
+    const m = el.messages;
+    return m.scrollHeight - m.scrollTop - m.clientHeight <= STICK_THRESHOLD;
+  }
+
+  /**
+   * Scroll the transcript to the bottom.
+   * `force` bypasses the pinned check (used for user-initiated actions such as
+   * sending a message or pressing the jump button); otherwise this is a no-op
+   * while the user is reading further up.
+   */
+  function scrollToBottom(force = false, smooth = false) {
+    if (!force && !isPinnedToBottom()) return;
+    const m = el.messages;
+    // `scroll-behavior: smooth` is applied per-call rather than globally so
+    // that programmatic appends land instantly and never animate against an
+    // in-progress user scroll.
+    m.scrollTo({ top: m.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  }
+
+  function scrollToTop() {
+    el.messages.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  /**
+   * Show each jump button only when it would actually do something, so they
+   * stay out of the way in a short conversation.
+   */
+  function updateScrollButtons() {
+    const m = el.messages;
+    const scrollable = m.scrollHeight - m.clientHeight > STICK_THRESHOLD;
+    el.scrollTop.hidden = !scrollable || m.scrollTop <= STICK_THRESHOLD;
+    el.scrollBottom.hidden = !scrollable || isPinnedToBottom();
+  }
+
+  function bindScrollControls() {
+    // rAF-throttled: scroll events fire far faster than we need to re-evaluate.
+    let queued = false;
+    el.messages.addEventListener("scroll", () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        updateScrollButtons();
+      });
+    }, { passive: true });
+
+    el.scrollTop.addEventListener("click", scrollToTop);
+    el.scrollBottom.addEventListener("click", () => scrollToBottom(true, true));
+
+    // Keep the buttons honest when the viewport (and so clientHeight) changes.
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(updateScrollButtons).observe(el.messages);
+    } else {
+      window.addEventListener("resize", updateScrollButtons);
+    }
+
+    // Home/End jump the transcript when it has focus, matching normal
+    // scroll-container behaviour that the custom layout would otherwise eat.
+    el.messages.addEventListener("keydown", (e) => {
+      if (e.key === "Home") { e.preventDefault(); scrollToTop(); }
+      else if (e.key === "End") { e.preventDefault(); scrollToBottom(true, true); }
+    });
+  }
+
+  // --------------------------------------------------------------- sidebar
+
+  function setSidebar(open) {
+    document.body.classList.toggle("sidebar-collapsed", !open);
+    el.sidebarToggle.setAttribute("aria-expanded", String(open));
+    try { localStorage.setItem("sidebarOpen", open ? "1" : "0"); } catch (_) {}
+  }
+
+  function bindSidebar() {
+    let open = true;
+    try { open = localStorage.getItem("sidebarOpen") !== "0"; } catch (_) {}
+    // On narrow screens the sidebar stacks above the chat and eats the
+    // viewport, so start it collapsed there regardless of the stored value.
+    if (window.matchMedia("(max-width: 900px)").matches) open = false;
+    setSidebar(open);
+
+    el.sidebarToggle.addEventListener("click", () => {
+      const nowOpen = el.sidebarToggle.getAttribute("aria-expanded") !== "true";
+      setSidebar(nowOpen);
+      if (nowOpen) el.sidebar.scrollTop = 0; // always reveal persona controls first
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" &&
+          document.body.classList.contains("sidebar-collapsed") === false &&
+          window.matchMedia("(max-width: 900px)").matches) {
+        setSidebar(false);
+      }
+    });
+  }
 
   // ---------------------------------------------------------------- utils
 
@@ -256,7 +367,9 @@
 
     wrap.append(avatar, bubble);
     el.messages.appendChild(wrap);
-    el.messages.scrollTop = el.messages.scrollHeight;
+    // Only follow the new message if the user was already at the bottom.
+    scrollToBottom(role === "user");
+    updateScrollButtons();
     return wrap;
   }
 
@@ -302,7 +415,8 @@
       '<div class="avatar" aria-hidden="true">AI</div>' +
       '<div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>';
     el.messages.appendChild(wrap);
-    el.messages.scrollTop = el.messages.scrollHeight;
+    scrollToBottom();
+    updateScrollButtons();
     return wrap;
   }
 
@@ -585,8 +699,11 @@
   // ---------------------------------------------------------------- init
 
   (async function init() {
+    bindScrollControls();
+    bindSidebar();
     await refreshStatus();
     await refreshDocuments();
+    updateScrollButtons();
     el.chatInput.focus();
   })();
 })();
