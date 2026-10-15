@@ -327,4 +327,8 @@ speed is irrelevant and the transparency is not.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GNU General Public License v3.0 — see [LICENSE](LICENSE).
+
+Copyleft: you may use, study, modify, and redistribute this code, but anything
+you distribute that is derived from it must also be GPL-3.0 with source
+available.
